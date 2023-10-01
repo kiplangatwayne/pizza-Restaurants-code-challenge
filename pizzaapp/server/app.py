@@ -1,16 +1,13 @@
 from flask import Flask, jsonify, request
-from flask_sqlalchemy import SQLAlchemy
+from models import db, Restaurant, Pizza, RestaurantPizza
 from flask_migrate import Migrate
 from flask_cors import CORS
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///pizza_restaurants.db'  # Adjust the database URI as needed
-db = SQLAlchemy(app)
+db.init_app(app)
 migrate = Migrate(app, db)
-CORS(app)  # Enable CORS for all routes
 
-# Import your models here (Restaurant, Pizza, RestaurantPizza)
-from models import Restaurant, Pizza, RestaurantPizza
 
 # Create tables if they don't exist (you can use Flask-Migrate for production)
 with app.app_context():
@@ -25,29 +22,29 @@ def get_restaurants():
 @app.route('/restaurants/<int:restaurant_id>', methods=['GET'])
 def get_restaurant(restaurant_id):
     restaurant = Restaurant.query.get(restaurant_id)
-    if not restaurant:
+    if restaurant:
+        pizzas = [{'id': p.id, 'name': p.name, 'ingredients': p.ingredients} for p in restaurant.pizzas]
+        restaurant_data = {
+            'id': restaurant.id,
+            'name': restaurant.name,
+            'address': restaurant.address,
+            'pizzas': pizzas
+        }
+        return jsonify(restaurant_data)
+    else:
         return jsonify({'error': 'Restaurant not found'}), 404
-
-    pizzas = [{'id': p.id, 'name': p.name, 'ingredients': p.ingredients} for p in restaurant.pizzas]
-    restaurant_data = {
-        'id': restaurant.id,
-        'name': restaurant.name,
-        'address': restaurant.address,
-        'pizzas': pizzas
-    }
-    return jsonify(restaurant_data)
 
 @app.route('/restaurants/<int:restaurant_id>', methods=['DELETE'])
 def delete_restaurant(restaurant_id):
     restaurant = Restaurant.query.get(restaurant_id)
-    if not restaurant:
+    if restaurant:
+        # Delete associated RestaurantPizza records
+        RestaurantPizza.query.filter_by(restaurant_id=restaurant_id).delete()
+        db.session.delete(restaurant)
+        db.session.commit()
+        return ('', 204)
+    else:
         return jsonify({'error': 'Restaurant not found'}), 404
-
-    # Delete associated RestaurantPizza records
-    RestaurantPizza.query.filter_by(restaurant_id=restaurant_id).delete()
-    db.session.delete(restaurant)
-    db.session.commit()
-    return ('', 204)
 
 @app.route('/pizzas', methods=['GET'])
 def get_pizzas():
@@ -69,13 +66,13 @@ def create_restaurant_pizza():
     restaurant = Restaurant.query.get(restaurant_id)
     pizza = Pizza.query.get(pizza_id)
 
-    if not (restaurant and pizza):
+    if restaurant and pizza:
+        restaurant_pizza = RestaurantPizza(price=price, restaurant=restaurant, pizza=pizza)
+        db.session.add(restaurant_pizza)
+        db.session.commit()
+        return jsonify({'id': pizza.id, 'name': pizza.name, 'ingredients': pizza.ingredients})
+    else:
         return jsonify({'errors': ['Validation error: Restaurant or Pizza not found']}), 400
 
-    restaurant_pizza = RestaurantPizza(price=price, restaurant=restaurant, pizza=pizza)
-    db.session.add(restaurant_pizza)
-    db.session.commit()
-    return jsonify({'id': pizza.id, 'name': pizza.name, 'ingredients': pizza.ingredients})
-
 if __name__ == '__main__':
-    app.run(port=5000, debug=True)
+    app.run(port=5000,debug=True)
